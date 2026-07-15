@@ -21,6 +21,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from enum import Enum
 
+from charge_confirmation import (
+    CONFIRMATION_INTERVAL_SECONDS,
+    MAX_CONFIRMATION_ATTEMPTS,
+    confirm_charge,
+)
+from charge_request import build_charge_params
+from ports import is_port_free
 from config import (
     OPEN_ID,
     AREA_ID,
@@ -108,25 +115,14 @@ async def begin_charge(
 ) -> dict:
     """启动充电（两步调用）"""
     url = f"{BASE_URL}/wxn/beginCharge"
-    params = {
-        "devaddress": devaddress,
-        "port": port,
-        "money": money,
-        "areaId": AREA_ID,
-        "openId": OPEN_ID,
-        "beforemoney": money,
-        "devtypeid": device_info.get("devtypeid", 40),
-        "fullStop": 0,
-        "payType": 1,
-        "safeOpen": 0,
-        "safeCharge": device_info.get("safeCharge", 9),
-        "edtType": 0,
-        "efee": device_info.get("efee", 110),
-        "eCharge": device_info.get("eCharge", 55),
-        "serviceCharge": device_info.get("serviceCharge", 55),
-        "userId": 0,
-        "yuan7": 0,
-    }
+    params = build_charge_params(
+        devaddress,
+        port,
+        money,
+        device_info,
+        AREA_ID,
+        OPEN_ID,
+    )
 
     # 第一次调用 - 获取 msgflag
     async with session.post(url, data=params, headers=HEADERS) as resp:
@@ -139,10 +135,29 @@ async def begin_charge(
     if not msgflag:
         return {"success": False, "msg": "未获取到 msgflag"}
 
-    # 第二次调用 - 带 msgflag 确认
+    # 后续调用 - 使用同一个 msgflag 等待设备响应
     params["msgflag"] = msgflag
-    async with session.post(url, data=params, headers=HEADERS) as resp:
-        return await resp.json()
+    log(
+        f"已获取启动凭据，将每 {CONFIRMATION_INTERVAL_SECONDS} 秒确认一次，"
+        f"最多 {MAX_CONFIRMATION_ATTEMPTS} 次"
+    )
+
+    def log_confirmation(attempt: int, result: dict):
+        if result.get("success"):
+            log(f"设备确认第 {attempt}/{MAX_CONFIRMATION_ATTEMPTS} 次成功")
+        else:
+            log(
+                f"设备确认第 {attempt}/{MAX_CONFIRMATION_ATTEMPTS} 次未成功: "
+                f"{result.get('msg', '未知错误')}"
+            )
+
+    return await confirm_charge(
+        session,
+        url,
+        params,
+        HEADERS,
+        on_result=log_confirmation,
+    )
 
 
 def find_power_off_record(logs: list) -> Optional[dict]:
@@ -191,17 +206,6 @@ def find_power_off_record(logs: list) -> Optional[dict]:
             return record
 
     return None
-
-
-def is_port_free(portstatur: str, port: str) -> bool:
-    """检查端口是否空闲"""
-    try:
-        port_index = int(port)
-        if port_index >= len(portstatur):
-            return False
-        return portstatur[port_index] == "0"
-    except (ValueError, IndexError):
-        return False
 
 
 async def try_charge(session: aiohttp.ClientSession) -> Tuple[ChargeResult, str]:
