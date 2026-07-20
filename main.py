@@ -14,6 +14,7 @@ VPS 定时任务：
     5 6 * * * cd /path/to/auto-charger && python3 main.py >> charge.log 2>&1
 """
 
+import argparse
 import aiohttp
 import asyncio
 import sys
@@ -65,6 +66,7 @@ class ChargeResult(Enum):
     NO_RECORD = "no_record"       # 无断电记录（不需要重试）
     PORT_BUSY = "port_busy"       # 端口被占用（需要重试）
     ERROR = "error"               # 其他错误（需要重试）
+    DRY_RUN = "dry_run"           # 仅预览，不启动充电
 
 
 def log(message: str):
@@ -208,7 +210,7 @@ def find_power_off_record(logs: list) -> Optional[dict]:
     return None
 
 
-async def try_charge(session: aiohttp.ClientSession) -> Tuple[ChargeResult, str]:
+async def try_charge(session: aiohttp.ClientSession, dry_run: bool = False) -> Tuple[ChargeResult, str]:
     """
     尝试充电
 
@@ -271,6 +273,21 @@ async def try_charge(session: aiohttp.ClientSession) -> Tuple[ChargeResult, str]
 
         log(f"端口 {port} 空闲，准备充电")
 
+        if dry_run:
+            params = build_charge_params(
+                devaddress,
+                port,
+                balance,
+                device_info,
+                AREA_ID,
+                OPEN_ID,
+            )
+            log("DRY RUN — 充电未启动")
+            log(f"预览: 设备={params['devaddress']}, 物理端口={params['port']}")
+            log(f"预览: money 请求选项={params['money']}")
+            log(f"预览: 可用余额 / beforemoney={params['beforemoney']}")
+            return ChargeResult.DRY_RUN, "DRY RUN — charging not started / 充电未启动"
+
         # 6. 启动充电
         log(f"启动充电: 设备={devaddress}, 端口={port}, 金额={balance / 100:.2f}元")
         result = await begin_charge(session, devaddress, port, balance, device_info)
@@ -284,10 +301,13 @@ async def try_charge(session: aiohttp.ClientSession) -> Tuple[ChargeResult, str]
         return ChargeResult.ERROR, f"发生异常: {str(e)}"
 
 
-async def main():
+async def main(dry_run: bool = False):
     log("=" * 50)
     log("Neptune 自动充电脚本启动")
-    log(f"重试策略: 最多 {MAX_RETRIES} 次，间隔 {RETRY_INTERVAL // 60} 分钟")
+    if dry_run:
+        log("DRY RUN — 仅评估一次，充电未启动")
+    else:
+        log(f"重试策略: 最多 {MAX_RETRIES} 次，间隔 {RETRY_INTERVAL // 60} 分钟")
     log("=" * 50)
 
     # 验证配置
@@ -299,12 +319,17 @@ async def main():
         return
 
     timeout = aiohttp.ClientTimeout(total=30)
+    attempts = 1 if dry_run else MAX_RETRIES
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        log(f"\n--- 第 {attempt}/{MAX_RETRIES} 次尝试 ---")
+    for attempt in range(1, attempts + 1):
+        log(f"\n--- 第 {attempt}/{attempts} 次尝试 ---")
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            result, message = await try_charge(session)
+            result, message = await try_charge(session, dry_run=dry_run)
+
+        if result == ChargeResult.DRY_RUN:
+            log(f"结果: {message}")
+            return
 
         if result == ChargeResult.SUCCESS:
             log("=" * 50)
@@ -322,7 +347,7 @@ async def main():
         elif result in (ChargeResult.PORT_BUSY, ChargeResult.ERROR):
             log(f"结果: {message}")
 
-            if attempt < MAX_RETRIES:
+            if attempt < attempts:
                 log(f"将在 {RETRY_INTERVAL // 60} 分钟后重试...")
                 await asyncio.sleep(RETRY_INTERVAL)
             else:
@@ -333,9 +358,22 @@ async def main():
     log("=" * 50)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Neptune 自动充电脚本")
+    parser.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help="评估并预览充电请求，但不启动充电",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_args()
+
     # 修复 Windows 终端编码
     if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
 
-    asyncio.run(main())
+    asyncio.run(main(dry_run=args.dry_run))
