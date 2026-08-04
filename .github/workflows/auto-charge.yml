@@ -25,6 +25,10 @@ jobs:
         run: |
           pip install -r requirements.txt
 
+      - name: Run tests
+        run: |
+          python -m unittest test_ports.py test_charge_request.py test_charge_confirmation.py
+
       - name: Create .env file
         run: |
           echo "NEPTUNE_OPEN_ID=${{ secrets.NEPTUNE_OPEN_ID }}" >> .env
