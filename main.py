@@ -2,7 +2,7 @@
 Neptune 自动充电脚本
 
 功能：
-1. 检测昨天 24 点因断电结束的充电记录
+1. 检测昨天 23:45 至今天 00:35 因断电结束的充电记录
 2. 如果存在，自动在同一设备/端口恢复充电
 3. 按余额最大化充电，最长 480 分钟
 4. 支持重试：失败后 10 分钟重试，最多 3 次
@@ -162,16 +162,21 @@ async def begin_charge(
     )
 
 
-def find_power_off_record(logs: list) -> Optional[dict]:
+def find_power_off_record(
+    logs: list,
+    now: Optional[datetime] = None,
+) -> Optional[dict]:
     """
     查找断电记录
 
     条件：
     1. endtype = 39（断电结束）
-    2. 结束时间在【昨天 23:45 - 今天 00:15】之间
+    2. 结束时间在【昨天 23:45 - 今天 00:35】之间
     3. 必须是昨天/今天的记录，不能是更早的
+
+    ``now`` 仅用于测试时注入固定的当前时间；生产调用保持默认行为。
     """
-    now = datetime.now(TZ_BEIJING)
+    now = now or datetime.now(TZ_BEIJING)
     today = now.date()
     yesterday = today - timedelta(days=1)
 
@@ -287,6 +292,23 @@ async def try_charge(session: aiohttp.ClientSession, dry_run: bool = False) -> T
             log(f"预览: money 请求选项={params['money']}")
             log(f"预览: 可用余额 / beforemoney={params['beforemoney']}")
             return ChargeResult.DRY_RUN, "DRY RUN — charging not started / 充电未启动"
+
+        # 再次读取设备状态，降低多个独立 workflow 同时启动时的竞争风险。
+        log(f"再次确认设备 {devaddress} 的端口状态...")
+        latest_device_info = await get_device_info(session, devaddress)
+        if not latest_device_info:
+            return ChargeResult.ERROR, "再次获取设备信息失败"
+
+        latest_port_status = latest_device_info.get("portstatur", "")
+        log(f"最新端口状态: {latest_port_status}")
+        if not is_port_free(latest_port_status, port):
+            return ChargeResult.PORT_BUSY, (
+                f"端口 {port} 在启动前变为非空闲"
+                "（可能已被其他运行占用或充电桩未开启）"
+            )
+
+        # 使用最新一次读取到的设备参数启动充电。
+        device_info = latest_device_info
 
         # 6. 启动充电
         log(f"启动充电: 设备={devaddress}, 端口={port}, 金额={balance / 100:.2f}元")

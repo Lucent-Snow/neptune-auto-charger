@@ -20,14 +20,14 @@ EMPLOYEE_ID = int(os.getenv("NEPTUNE_EMPLOYEE_ID", "0"))
 MAX_CHARGE_TIME = 480  # 最大充电时长（分钟）
 
 # API 配置
-BASE_URL = "http://www.szlzxn.cn"
+BASE_URL = "https://www.szlzxn.cn"
 
 # 断电检测时间窗口
-# 检测 23:45 - 00:15 之间的断电记录
+# 检测 23:45 - 00:35 之间的断电记录
 POWER_OFF_WINDOW_START_HOUR = 23
 POWER_OFF_WINDOW_START_MINUTE = 45
 POWER_OFF_WINDOW_END_HOUR = 0
-POWER_OFF_WINDOW_END_MINUTE = 15
+POWER_OFF_WINDOW_END_MINUTE = 35
 
 # 断电结束类型
 POWER_OFF_END_TYPE = 39

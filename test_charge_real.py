@@ -28,20 +28,16 @@ OPEN_ID = os.getenv("NEPTUNE_OPEN_ID")
 _area_id_raw = os.getenv("NEPTUNE_AREA_ID")
 AREA_ID = int(_area_id_raw) if _area_id_raw else None
 
-if not OPEN_ID or AREA_ID is None:
-    raise RuntimeError(
-        "缺少 .env 配置：请在 .env 中设置 NEPTUNE_OPEN_ID 与 NEPTUNE_AREA_ID（参考 .env.example）"
-    )
 DEV_ADDRESS = "50559141"  # 目标设备
 TARGET_PORT = "12"  # 目标物理端口（Neptune 端口号从 1 开始）
 
-BASE_URL = "http://www.szlzxn.cn"
+BASE_URL = "https://www.szlzxn.cn"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Linux; Android 16; 24117RK2CC Build/BP2A.250605.031.A3; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/142.0.7444.173 Mobile Safari/537.36 XWEB/1420113 MMWEBSDK/20250904 MMWEBID/7686 MicroMessenger/8.0.65.2960(0x28004153) WeChat/arm64 Weixin NetType/5G Language/zh_CN ABI/arm64",
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    "Origin": "http://www.szlzxn.cn",
-    "Referer": f"http://www.szlzxn.cn/wx/indexn.html?openId={OPEN_ID}&areaid={AREA_ID}",
+    "Origin": BASE_URL,
+    "Referer": f"{BASE_URL}/wx/indexn.html?openId={OPEN_ID}&areaid={AREA_ID}",
     "Accept": "*/*",
 }
 
@@ -123,6 +119,11 @@ async def begin_charge(
 
 
 async def main():
+    if not OPEN_ID or AREA_ID is None:
+        raise RuntimeError(
+            "缺少 .env 配置：请在 .env 中设置 NEPTUNE_OPEN_ID 与 NEPTUNE_AREA_ID（参考 .env.example）"
+        )
+
     print("=" * 60)
     print("Neptune 充电桩 - 实际充电测试")
     print("=" * 60)
