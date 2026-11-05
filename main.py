@@ -29,6 +29,7 @@ from charge_confirmation import (
 )
 from charge_request import build_charge_params
 from ports import is_port_free
+from notify import notify_result
 from config import (
     OPEN_ID,
     AREA_ID,
@@ -86,15 +87,21 @@ async def get_user_info(session: aiohttp.ClientSession) -> Optional[dict]:
     return None
 
 
-async def get_charge_log(session: aiohttp.ClientSession, term: str) -> list:
-    """获取指定月份的充电历史记录"""
+async def get_charge_log(session: aiohttp.ClientSession, term: str) -> Optional[list]:
+    """获取指定月份的充电历史记录。
+
+    接口失败返回 ``None``（与「确实没有记录」的空列表区分开，
+    避免把接口故障伪装成无需续充）。
+    """
     url = f"{BASE_URL}/wxn/getChargeLog"
     data = {"employeeid": EMPLOYEE_ID, "term": term}
     async with session.post(url, data=data, headers=HEADERS) as resp:
         result = await resp.json()
         if result.get("success"):
             return result.get("obj", [])
-    return []
+        log(f"充电历史接口返回失败: {result.get('msg')}")
+        return None
+    return None
 
 
 async def get_device_info(session: aiohttp.ClientSession, devaddress: str) -> Optional[dict]:
@@ -241,13 +248,19 @@ async def try_charge(session: aiohttp.ClientSession, dry_run: bool = False) -> T
 
         term_this = now.strftime("%Y%m")
         log(f"获取 {term_this} 充电历史...")
-        logs.extend(await get_charge_log(session, term_this))
+        this_month = await get_charge_log(session, term_this)
+        if this_month is None:
+            return ChargeResult.ERROR, f"获取 {term_this} 充电历史失败"
+        logs.extend(this_month)
 
         if now.day <= 3:
             last_month = now.replace(day=1) - timedelta(days=1)
             term_last = last_month.strftime("%Y%m")
             log(f"获取 {term_last} 充电历史...")
-            logs.extend(await get_charge_log(session, term_last))
+            last_month_logs = await get_charge_log(session, term_last)
+            if last_month_logs is None:
+                return ChargeResult.ERROR, f"获取 {term_last} 充电历史失败"
+            logs.extend(last_month_logs)
 
         if not logs:
             return ChargeResult.NO_RECORD, "无充电历史记录"
@@ -359,6 +372,10 @@ async def main(dry_run: bool = False):
             log(f"  {message}")
             log(f"  最长时间: {MAX_CHARGE_TIME} 分钟")
             log("=" * 50)
+
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                notified = await notify_result(session, True, message)
+            log("钉钉通知已发送" if notified else "钉钉通知未配置或发送失败")
             return
 
         elif result == ChargeResult.NO_RECORD:
@@ -378,6 +395,11 @@ async def main(dry_run: bool = False):
     log("=" * 50)
     log("所有重试均失败")
     log("=" * 50)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        notified = await notify_result(session, False, message)
+    log("钉钉通知已发送" if notified else "钉钉通知未配置或发送失败")
+    sys.exit(1)
 
 
 def parse_args():

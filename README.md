@@ -79,12 +79,18 @@ crontab -e
 | `NEPTUNE_OPEN_ID` | 微信用户标识 | 抓包获取 |
 | `NEPTUNE_AREA_ID` | 区域 ID | 固定为 6 |
 | `NEPTUNE_EMPLOYEE_ID` | 用户 ID | 抓包获取 |
+| `DINGTALK_WEBHOOK` | 钉钉机器人 webhook（可选） | 群里添加「自定义机器人」 |
+| `DINGTALK_SECRET` | 钉钉加签密钥（可选） | 机器人安全设置选择「加签」 |
 
 ### 如何获取这些信息？
 
 1. 使用抓包工具（Fiddler/Charles）抓取微信小程序请求
 2. 找到 `www.szlzxn.cn` 的请求
 3. 从请求参数中获取 `openId` 和 `employeeId`
+
+### 钉钉通知（可选）
+
+配置 `DINGTALK_WEBHOOK` 后，脚本会在**充电恢复成功**和**重试全部失败**时推送钉钉消息（加签模式）；两个变量留空则完全关闭通知。
 
 ## 本地测试
 
